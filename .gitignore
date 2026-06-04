@@ -1,0 +1,30 @@
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+CMakeUserPresets.json
+build-trace.jsonl
+
+*.jucer
+*.user
+*.suo
+*.vcxproj.user
+*.xcuserstate
+*.DS_Store
+
+*.vst3/
+*.component/
+*.app/
+
+# Stray incomplete Flutter engine clone (has its own nested .git)
+lufs_monitor/
+
+# Empty packaging payload dirs
+dist/package-universal-root/
+dist/pkg-universal-payload/
+
+# Local Claude Code settings
+.claude/settings.local.json
+.claude/*.lock
