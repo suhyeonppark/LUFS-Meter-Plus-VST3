@@ -29,20 +29,11 @@ LufsMeterPlusAudioProcessorEditor::LufsMeterPlusAudioProcessorEditor (LufsMeterP
     resetButton.onClick = [this]
     {
         audioProcessor.requestMeasurementReset();
-        shortTermHistory.clear();
-        longTermHistory.clear();
-        displayedTruePeakDb = -100.0f;
-        displayedIntegratedLufs = -70.0f;
-        displayedMomentaryLufs = -70.0f;
-        displayedShortTermLufs = -70.0f;
-        displayedLoudnessRangeLu = 0.0f;
-        displayedGainReductionDb = 0.0f;
-        displayedRtaBandDb.fill (-80.0f);
-        averageRtaBandDb.fill (-80.0f);
-        rtaAverageFrameCount = 0;
-        graphElapsedSeconds = 0.0;
-        lastTimerSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
-    }; 
+        // Clear immediately so the button feels instant; the generation we just
+        // bumped is recorded so timerCallback doesn't clear a second time.
+        resetGraphState();
+        lastResetGeneration = audioProcessor.resetGeneration.load();
+    };
     addAndMakeVisible (resetButton);
 
     configureModeButton (rtaModeButton, "RTA");
@@ -114,7 +105,7 @@ void LufsMeterPlusAudioProcessorEditor::resized()
     titleLabel.setBounds (header.withSizeKeepingCentre (360, header.getHeight()));
     resetButton.setBounds (header.removeFromRight (64).withSizeKeepingCentre (60, 22));
 
-    levelMeterBounds = body.removeFromLeft (126);
+    levelMeterBounds = body.removeFromLeft (150);
     body.removeFromLeft (18);
     readoutStackBounds = body.removeFromLeft (164);
     body.removeFromLeft (20);
@@ -146,8 +137,34 @@ void LufsMeterPlusAudioProcessorEditor::resized()
     layoutComboBox (controls.withTrimmedLeft (12), rtaSlopeLabel, rtaSlopeComboBox);
 }
 
+void LufsMeterPlusAudioProcessorEditor::resetGraphState()
+{
+    shortTermHistory.clear();
+    longTermHistory.clear();
+    displayedTruePeakDb.fill (-100.0f);
+    displayedIntegratedLufs = -70.0f;
+    displayedMomentaryLufs = -70.0f;
+    displayedShortTermLufs = -70.0f;
+    displayedLoudnessRangeLu = 0.0f;
+    displayedGainReductionDb = 0.0f;
+    displayedRtaBandDb.fill (-80.0f);
+    averageRtaBandDb.fill (-80.0f);
+    rtaAverageFrameCount = 0;
+    graphElapsedSeconds = 0.0;
+    lastTimerSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
+}
+
 void LufsMeterPlusAudioProcessorEditor::timerCallback()
 {
+    // A reset may have arrived remotely (monitor app over UDP) without going
+    // through the button; clear the graph history when the generation changes.
+    const auto resetGen = audioProcessor.resetGeneration.load();
+    if (resetGen != lastResetGeneration)
+    {
+        lastResetGeneration = resetGen;
+        resetGraphState();
+    }
+
     const auto nowSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
     graphElapsedSeconds += juce::jmax (0.0, nowSeconds - lastTimerSeconds);
     lastTimerSeconds = nowSeconds;
@@ -159,7 +176,8 @@ void LufsMeterPlusAudioProcessorEditor::timerCallback()
     const auto alertColour = juce::Colour (0xffff5a5f);
     const auto normalColour = juce::Colours::white;
 
-    displayedTruePeakDb = smoothMeterValue (displayedTruePeakDb, audioProcessor.truePeakDb.load());
+    displayedTruePeakDb[0] = smoothMeterValue (displayedTruePeakDb[0], audioProcessor.truePeakDb[0].load());
+    displayedTruePeakDb[1] = smoothMeterValue (displayedTruePeakDb[1], audioProcessor.truePeakDb[1].load());
     displayedIntegratedLufs = smoothMeterValue (displayedIntegratedLufs, longTerm);
     displayedMomentaryLufs = smoothMeterValue (displayedMomentaryLufs, momentary);
     displayedShortTermLufs = smoothMeterValue (displayedShortTermLufs, shortTerm);
@@ -200,7 +218,10 @@ void LufsMeterPlusAudioProcessorEditor::timerCallback()
     momentaryLufsLabel.setText (formatDb (displayedMomentaryLufs, " LUFS"), juce::dontSendNotification);
     shortTermLufsLabel.setText (formatDb (displayedShortTermLufs, " LUFS"), juce::dontSendNotification);
     loudnessUnitsLabel.setText (formatDb (displayedLoudnessRangeLu, " LU"), juce::dontSendNotification);
-    truePeakLabel.setText (formatDb (displayedTruePeakDb, " dBFS"), juce::dontSendNotification);
+    
+    const auto truePeakMax = juce::jmax (displayedTruePeakDb[0], displayedTruePeakDb[1]);
+    truePeakLabel.setText (formatDb (truePeakMax, " dBFS"), juce::dontSendNotification);
+    
     gainReductionLabel.setText (formatDb (displayedGainReductionDb, " dB"), juce::dontSendNotification);
     integratedLufsLabel.setColour (juce::Label::textColourId, longTerm > targetLufs ? alertColour : normalColour);
     momentaryLufsLabel.setColour (juce::Label::textColourId, momentary > targetLufs ? alertColour : normalColour);
@@ -276,65 +297,109 @@ void LufsMeterPlusAudioProcessorEditor::drawLevelMeter (juce::Graphics& g, juce:
         return;
 
     auto labelArea = bounds.removeFromBottom (40);
-    auto meter = bounds.reduced (22, 16);
+    auto meter = bounds.reduced (14, 16);
+    const auto channelLabelRow = meter.removeFromTop (20);
     const auto scale = meter.removeFromLeft (38);
-    const auto barArea = meter.withWidth (34).withCentre ({ meter.getCentreX(), meter.getCentreY() });
-    const auto innerBarArea = barArea.reduced (4, 4);
-    const auto truePeak = juce::jlimit (-60.0f, 0.0f, displayedTruePeakDb);
-    const auto normalized = juce::jmap (truePeak, -60.0f, 0.0f, 0.0f, 1.0f);
-    const auto fillHeight = static_cast<float> (innerBarArea.getHeight()) * normalized;
+
+    // Two stereo bars (L and R) with a small gap so they read as two channels
+    // without drifting too far apart.
+    const auto barWidth = 20;
+    const auto barSpacing = 0;
+    const auto totalBarWidth = barWidth * 2 + barSpacing;
+    auto barAreaCenter = meter.withWidth (totalBarWidth).withCentre ({ meter.getCentreX(), meter.getCentreY() });
+    
+    // Left channel bar
+    auto barAreaL = barAreaCenter.removeFromLeft (barWidth);
+    auto innerBarAreaL = barAreaL.reduced (2, 4);
+    const auto truePeakL = juce::jlimit (-60.0f, 0.0f, displayedTruePeakDb[0]);
+    const auto normalizedL = juce::jmap (truePeakL, -60.0f, 0.0f, 0.0f, 1.0f);
+    const auto fillHeightL = static_cast<float> (innerBarAreaL.getHeight()) * normalizedL;
+    
+    // Right channel bar (skip spacing)
+    barAreaCenter.removeFromLeft (barSpacing);
+    auto barAreaR = barAreaCenter.removeFromLeft (barWidth);
+    auto innerBarAreaR = barAreaR.reduced (2, 4);
+    const auto truePeakR = juce::jlimit (-60.0f, 0.0f, displayedTruePeakDb[1]);
+    const auto normalizedR = juce::jmap (truePeakR, -60.0f, 0.0f, 0.0f, 1.0f);
+    const auto fillHeightR = static_cast<float> (innerBarAreaR.getHeight()) * normalizedR;
 
     g.setColour (juce::Colour (bodyBackground));
     g.fillRect (bounds);
 
     for (auto db : { -3, -9, -15, -21, -30, -42, -54 })
     {
-        const auto y = juce::jmap (static_cast<float> (db), -60.0f, 0.0f, static_cast<float> (barArea.getBottom()), static_cast<float> (barArea.getY()));
+        const auto y = juce::jmap (static_cast<float> (db), -60.0f, 0.0f, static_cast<float> (barAreaL.getBottom()), static_cast<float> (barAreaL.getY()));
         g.setColour (juce::Colour (0x4538414c));
-        g.drawHorizontalLine (static_cast<int> (std::round (y)), static_cast<float> (barArea.getX() - 5), static_cast<float> (barArea.getRight() + 5));
+        g.drawHorizontalLine (static_cast<int> (std::round (y)), static_cast<float> (scale.getRight() - 5), static_cast<float> (barAreaR.getRight() + 5));
     }
 
     g.setFont (juce::FontOptions (10.5f));
 
     for (auto db : { 0, -6, -12, -18, -24, -36, -48, -60 })
     {
-        const auto y = juce::jmap (static_cast<float> (db), -60.0f, 0.0f, static_cast<float> (barArea.getBottom()), static_cast<float> (barArea.getY()));
+        const auto y = juce::jmap (static_cast<float> (db), -60.0f, 0.0f, static_cast<float> (barAreaL.getBottom()), static_cast<float> (barAreaL.getY()));
         g.setColour (db >= -6 ? juce::Colour (0xffc4ccd5) : juce::Colour (0xff8d98a5));
         g.drawText (juce::String (db), scale.getX(), static_cast<int> (std::round (y)) - 8, scale.getWidth() - 8, 16, juce::Justification::centredRight);
         g.setColour (db >= -6 ? juce::Colour (0xff4b5664) : juce::Colour (0xff38414c));
-        g.drawHorizontalLine (static_cast<int> (std::round (y)), static_cast<float> (barArea.getX() - 8), static_cast<float> (barArea.getRight() + 8));
+        g.drawHorizontalLine (static_cast<int> (std::round (y)), static_cast<float> (scale.getRight() - 8), static_cast<float> (barAreaR.getRight() + 8));
     }
 
+    // Draw left channel bar background and fill
     g.setColour (juce::Colour (0xff080b0f));
-    g.fillRoundedRectangle (barArea.toFloat(), 3.0f);
+    g.fillRoundedRectangle (barAreaL.toFloat(), 3.0f);
     g.setColour (juce::Colour (0xff202733));
-    g.fillRoundedRectangle (innerBarArea.toFloat(), 2.0f);
+    g.fillRoundedRectangle (innerBarAreaL.toFloat(), 2.0f);
 
-    auto fill = innerBarArea.toFloat();
-    fill.setY (static_cast<float> (innerBarArea.getBottom()) - fillHeight);
-    fill.setHeight (fillHeight);
-    const auto fillColour = truePeak >= -1.0f ? juce::Colour (0xffff5a5f)
-                          : truePeak >= -6.0f ? juce::Colour (0xffffcf5a)
-                                               : juce::Colour (0xff56a5ff);
+    auto fillL = innerBarAreaL.toFloat();
+    fillL.setY (static_cast<float> (innerBarAreaL.getBottom()) - fillHeightL);
+    fillL.setHeight (fillHeightL);
+    const auto fillColourL = truePeakL >= -1.0f ? juce::Colour (0xffff5a5f)
+                           : truePeakL >= -6.0f ? juce::Colour (0xffffcf5a)
+                                                : juce::Colour (0xff56a5ff);
     g.setGradientFill (juce::ColourGradient (juce::Colour (0xff56a5ff),
-                                             fill.getCentreX(),
-                                             fill.getBottom(),
-                                             fillColour,
-                                             fill.getCentreX(),
-                                             fill.getY(),
-                                             false));
-    g.fillRoundedRectangle (fill, 2.0f);
+                                            fillL.getCentreX(),
+                                            fillL.getBottom(),
+                                            fillColourL,
+                                            fillL.getCentreX(),
+                                            fillL.getY(),
+                                            false));
+    g.fillRoundedRectangle (fillL, 2.0f);
+    
+    // Draw right channel bar background and fill
+    g.setColour (juce::Colour (0xff080b0f));
+    g.fillRoundedRectangle (barAreaR.toFloat(), 3.0f);
+    g.setColour (juce::Colour (0xff202733));
+    g.fillRoundedRectangle (innerBarAreaR.toFloat(), 2.0f);
+
+    auto fillR = innerBarAreaR.toFloat();
+    fillR.setY (static_cast<float> (innerBarAreaR.getBottom()) - fillHeightR);
+    fillR.setHeight (fillHeightR);
+    const auto fillColourR = truePeakR >= -1.0f ? juce::Colour (0xffff5a5f)
+                           : truePeakR >= -6.0f ? juce::Colour (0xffffcf5a)
+                                                : juce::Colour (0xff56a5ff);
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff56a5ff),
+                                            fillR.getCentreX(),
+                                            fillR.getBottom(),
+                                            fillColourR,
+                                            fillR.getCentreX(),
+                                            fillR.getY(),
+                                            false));
+    g.fillRoundedRectangle (fillR, 2.0f);
 
     g.setColour (juce::Colour (0x3388929e));
     for (auto db : { -12, -24, -36, -48 })
     {
-        const auto y = juce::jmap (static_cast<float> (db), -60.0f, 0.0f, static_cast<float> (innerBarArea.getBottom()), static_cast<float> (innerBarArea.getY()));
-        g.drawHorizontalLine (static_cast<int> (std::round (y)), static_cast<float> (innerBarArea.getX()), static_cast<float> (innerBarArea.getRight()));
+        const auto y = juce::jmap (static_cast<float> (db), -60.0f, 0.0f, static_cast<float> (innerBarAreaL.getBottom()), static_cast<float> (innerBarAreaL.getY()));
+        g.drawHorizontalLine (static_cast<int> (std::round (y)), static_cast<float> (innerBarAreaL.getX()), static_cast<float> (innerBarAreaR.getRight()));
     }
 
-    g.setColour (juce::Colour (0xffdce3ec));
-    g.setFont (juce::FontOptions (15.0f));
-    g.drawText ("dBFS", labelArea.withWidth (barArea.getWidth()).withCentre ({ barArea.getCentreX(), labelArea.getCentreY() }), juce::Justification::centred);
+    g.setColour (juce::Colour (0xffe6ebf2));
+    g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+    g.drawText ("L", barAreaL.withY (channelLabelRow.getY()).withHeight (channelLabelRow.getHeight()), juce::Justification::centred);
+    g.drawText ("R", barAreaR.withY (channelLabelRow.getY()).withHeight (channelLabelRow.getHeight()), juce::Justification::centred);
+    g.setColour (juce::Colour (0xffaab3bf));
+    g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+    g.drawText ("dBFS", labelArea.withX (barAreaL.getX()).withWidth (barAreaR.getRight() - barAreaL.getX()).withHeight (16), juce::Justification::centred);
 }
 
 void LufsMeterPlusAudioProcessorEditor::drawReadoutStack (juce::Graphics& g, juce::Rectangle<int> bounds)
@@ -398,15 +463,21 @@ void LufsMeterPlusAudioProcessorEditor::drawGraphGrid (juce::Graphics& g, juce::
     g.setColour (juce::Colour (bodyBackground));
     g.fillRect (bounds);
 
-    g.setColour (juce::Colour (0xff27303a));
+    // Mirror drawLufsGraph's plot area exactly so the gridlines and dB labels
+    // line up with the plotted data and the target line.
+    const auto plotTop = static_cast<float> (bounds.getY() + 32);
+    const auto plotBottom = static_cast<float> (bounds.getBottom() - 32);
+    const auto lineLeft = static_cast<float> (bounds.getX() + 54);
+    const auto lineRight = static_cast<float> (bounds.getRight() - 18);
+
     for (auto db : { 0, -3, -6, -9, -18, -23, -27, -36, -45, -54 })
     {
-        const auto y = juce::jmap (static_cast<float> (db), -60.0f, 0.0f, static_cast<float> (bounds.getBottom() - 16), static_cast<float> (bounds.getY() + 18));
-        g.drawHorizontalLine (static_cast<int> (std::round (y)), static_cast<float> (bounds.getX() + 56), static_cast<float> (bounds.getRight() - 12));
+        const auto y = juce::jmap (static_cast<float> (db), -60.0f, 0.0f, plotBottom, plotTop);
+        g.setColour (juce::Colour (0xff27303a));
+        g.drawHorizontalLine (static_cast<int> (std::round (y)), lineLeft, lineRight);
         g.setColour (juce::Colour (0xff88929e));
         g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
         g.drawText (juce::String (db), bounds.getX() + 12, static_cast<int> (std::round (y)) - 8, 34, 16, juce::Justification::centredRight);
-        g.setColour (juce::Colour (0xff27303a));
     }
 }
 

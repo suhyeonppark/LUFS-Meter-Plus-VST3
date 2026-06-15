@@ -60,6 +60,11 @@ LufsMeterPlusAudioProcessor::LufsMeterPlusAudioProcessor()
       rtaFft(rtaFftOrder),
       rtaWindow(rtaFftSize, juce::dsp::WindowingFunction<float>::hann)
 {
+    // Initialize stereo peak arrays
+    for (auto& v : truePeakDb) v.store(-100.0f);
+    for (auto& v : inputPeakDb) v.store(-100.0f);
+    for (auto& v : outputPeakDb) v.store(-100.0f);
+
     thresholdParameter = parameters.getRawParameterValue("threshold");
     ceilingParameter = parameters.getRawParameterValue("ceiling");
     releaseParameter = parameters.getRawParameterValue("release");
@@ -145,9 +150,9 @@ void LufsMeterPlusAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
     if (numSamples == 0 || oversampler == nullptr)
         return;
 
-    auto inputPeak = 0.0f;
+    std::array<float, 2> inputPeak = {0.0f, 0.0f};
     for (auto ch = 0; ch < processedChannels; ++ch)
-        inputPeak = juce::jmax(inputPeak, buffer.getMagnitude(ch, 0, numSamples));
+        inputPeak[ch] = buffer.getMagnitude(ch, 0, numSamples);
 
     const auto bypassed          = bypassParameter   != nullptr && bypassParameter->load()   > 0.5f;
     const auto ceilingDb         = ceilingParameter  != nullptr ? ceilingParameter->load()   : -1.0f;
@@ -159,7 +164,7 @@ void LufsMeterPlusAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
     const auto effectiveSampleRate = currentSampleRate * oversamplingFactor;
     const auto releaseCoeff      = std::exp(-1.0f / static_cast<float>(effectiveSampleRate * releaseSeconds));
 
-    auto truePeak = inputPeak;
+    std::array<float, 2> truePeak = inputPeak;
 
     // ── Limiter at oversampled rate ───────────────────────────────────────
     if (bypassed)
@@ -172,7 +177,7 @@ void LufsMeterPlusAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
         auto oversampledBlock = oversampler->processSamplesUp(nativeBlock);
         const auto osNumSamples = static_cast<int>(oversampledBlock.getNumSamples());
 
-        truePeak = 0.0f;
+        for (auto& v : truePeak) v = 0.0f;
 
         for (auto s = 0; s < osNumSamples; ++s)
         {
@@ -196,7 +201,7 @@ void LufsMeterPlusAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
                 const auto delayed = delay;
                 delay = data[s] * driveLinear;
                 data[s] = delayed * limiterGain;
-                truePeak = juce::jmax(truePeak, std::abs(data[s]));
+                truePeak[ch] = juce::jmax(truePeak[ch], std::abs(data[s]));
             }
             lookaheadWriteIndex = (lookaheadWriteIndex + 1) % lookaheadSamples;
         }
@@ -205,9 +210,9 @@ void LufsMeterPlusAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
     }
 
     // ── Metering at native rate ───────────────────────────────────────────
-    auto outputPeak = 0.0f;
+    std::array<float, 2> outputPeak = {0.0f, 0.0f};
     for (auto ch = 0; ch < processedChannels; ++ch)
-        outputPeak = juce::jmax(outputPeak, buffer.getMagnitude(ch, 0, numSamples));
+        outputPeak[ch] = buffer.getMagnitude(ch, 0, numSamples);
 
     for (auto s = 0; s < numSamples; ++s)
     {
@@ -243,9 +248,12 @@ void LufsMeterPlusAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer,
         shortTermPower = 0.0;
     }
 
-    inputPeakDb.store  (juce::Decibels::gainToDecibels(inputPeak,  -100.0f));
-    outputPeakDb.store (juce::Decibels::gainToDecibels(outputPeak, -100.0f));
-    truePeakDb.store   (juce::Decibels::gainToDecibels(truePeak, -100.0f));
+    inputPeakDb[0].store  (juce::Decibels::gainToDecibels(inputPeak[0],  -100.0f));
+    inputPeakDb[1].store  (juce::Decibels::gainToDecibels(inputPeak[1],  -100.0f));
+    outputPeakDb[0].store (juce::Decibels::gainToDecibels(outputPeak[0], -100.0f));
+    outputPeakDb[1].store (juce::Decibels::gainToDecibels(outputPeak[1], -100.0f));
+    truePeakDb[0].store   (juce::Decibels::gainToDecibels(truePeak[0], -100.0f));
+    truePeakDb[1].store   (juce::Decibels::gainToDecibels(truePeak[1], -100.0f));
     gainReductionDb.store (bypassed ? 0.0f : juce::jmin(0.0f, juce::Decibels::gainToDecibels(limiterGain, -100.0f)));
 
     momentaryLufs.store (powerToLufs(momentaryPower));
@@ -264,6 +272,7 @@ void LufsMeterPlusAudioProcessor::requestMeasurementReset()
     momentaryLufs.store(-70.0f);
     loudnessRangeLu.store(0.0f);
     measurementResetRequested.store(true);
+    resetGeneration.fetch_add(1, std::memory_order_relaxed);
 }
 
 float LufsMeterPlusAudioProcessor::getTargetLufs() const

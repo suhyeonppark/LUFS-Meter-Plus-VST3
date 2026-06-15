@@ -52,15 +52,19 @@ public:
     std::atomic<float> shortTermLufs { -70.0f };
     std::atomic<float> momentaryLufs { -70.0f };
     std::atomic<float> loudnessRangeLu { 0.0f };
-    std::atomic<float> truePeakDb { -100.0f };
+    std::array<std::atomic<float>, 2> truePeakDb {};
     std::atomic<float> gainReductionDb { 0.0f };
-    std::atomic<float> inputPeakDb { -100.0f };
-    std::atomic<float> outputPeakDb { -100.0f };
+    std::array<std::atomic<float>, 2> inputPeakDb {};
+    std::array<std::atomic<float>, 2> outputPeakDb {};
     std::atomic<double> measurementElapsedSeconds { 0.0 };
     std::array<std::atomic<float>, rtaBandCount> rtaBandDb {};
 
     // Heartbeat written from processBlock(); read by LufsUdpSender to gate sending.
     std::atomic<juce::int64> lastAudioTickMs { 0 };
+
+    // Bumped on every requestMeasurementReset() (GUI button or remote UDP). The
+    // editor watches this to clear its graph history regardless of reset source.
+    std::atomic<juce::uint32> resetGeneration { 0 };
 
 private:
     struct Biquad

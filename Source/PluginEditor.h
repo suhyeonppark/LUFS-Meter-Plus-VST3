@@ -30,6 +30,7 @@ private:
     void drawLufsGraph (juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawGraphGrid (juce::Graphics& g, juce::Rectangle<int> bounds);
     void updateModeButtons();
+    void resetGraphState();
     static float smoothMeterValue (float current, float target);
     static juce::String formatDb (float value, const juce::String& suffix);
     static juce::String formatElapsedTime (double seconds);
@@ -60,7 +61,7 @@ private:
 
     std::vector<float> shortTermHistory;
     std::vector<float> longTermHistory;
-    float displayedTruePeakDb = -100.0f;
+    std::array<float, 2> displayedTruePeakDb = {-100.0f, -100.0f};
     float displayedIntegratedLufs = -70.0f;
     float displayedMomentaryLufs = -70.0f;
     float displayedShortTermLufs = -70.0f;
@@ -72,6 +73,7 @@ private:
     bool showRtaView = false;
     double graphElapsedSeconds = 0.0;
     double lastTimerSeconds = 0.0;
+    juce::uint32 lastResetGeneration = 0;
 
     juce::Rectangle<int> levelMeterBounds;
     juce::Rectangle<int> targetInfoBounds;
