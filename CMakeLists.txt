@@ -58,7 +58,14 @@ target_link_libraries(LufsMeterPlus
 if (APPLE)
     function(lufs_meter_plus_suppress_external_sdk_warnings target_name)
         if (TARGET "${target_name}")
-            target_compile_options("${target_name}" PRIVATE -Wno-deprecated-declarations)
+            get_target_property(target_type "${target_name}" TYPE)
+            if (target_type STREQUAL "EXECUTABLE"
+                    OR target_type STREQUAL "STATIC_LIBRARY"
+                    OR target_type STREQUAL "MODULE_LIBRARY"
+                    OR target_type STREQUAL "SHARED_LIBRARY"
+                    OR target_type STREQUAL "OBJECT_LIBRARY")
+                target_compile_options("${target_name}" PRIVATE -Wno-deprecated-declarations)
+            endif()
         endif()
     endfunction()
 

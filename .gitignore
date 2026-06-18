@@ -24,6 +24,11 @@ lufs_monitor/
 # Empty packaging payload dirs
 dist/package-universal-root/
 dist/pkg-universal-payload/
+dist/notarize-work*/
+dist/*-signed-for-notary.zip
+
+# Local Apple certificate request files
+*.certSigningRequest
 
 # Local Claude Code settings
 .claude/settings.local.json

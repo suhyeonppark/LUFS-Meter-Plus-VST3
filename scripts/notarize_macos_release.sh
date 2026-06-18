@@ -19,7 +19,7 @@ if [[ -z "$APP_IDENTITY" ]]; then
 fi
 
 if [[ -z "$INSTALLER_IDENTITY" ]]; then
-  INSTALLER_IDENTITY="$(security find-identity -v -p codesigning | awk -F '"' '/Developer ID Installer/ { print $2; exit }')"
+  INSTALLER_IDENTITY="$(security find-identity -v | awk -F '"' '/Developer ID Installer/ { print $2; exit }')"
 fi
 
 if [[ -z "$APP_IDENTITY" ]]; then

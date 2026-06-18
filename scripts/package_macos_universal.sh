@@ -3,7 +3,7 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_NAME="LUFS Meter Plus"
-BUILD_PRESET="${1:-xcode-universal-local-release}"
+BUILD_PRESET="${1:-xcode-universal-release}"
 CONFIGURATION="${2:-Release}"
 
 export COPYFILE_DISABLE=1
@@ -15,7 +15,7 @@ if [[ -z "$VERSION" ]]; then
   VERSION="0.0.0"
 fi
 
-cmake --preset xcode-universal-local
+cmake --preset xcode-universal
 cmake --build --preset "$BUILD_PRESET" --config "$CONFIGURATION" --target LufsMeterPlus_VST3 LufsMeterPlus_Standalone
 
 VST3_SOURCE="$PROJECT_ROOT/build/xcode-universal/LufsMeterPlus_artefacts/$CONFIGURATION/VST3/$PROJECT_NAME.vst3"
