@@ -1,4 +1,4 @@
-# LUFS Meter Plus — 사용 설명서 (v0.1.0)
+# LUFS Meter Plus — 사용 설명서 (v1.0.0)
 
 LUFS Meter Plus 는 K-weighted 라우드니스 측정과 트루 피크 세이프티
 리미터를 하나로 묶은 마스터 버스용 유틸리티입니다. 본 매뉴얼은 설치 →
@@ -257,7 +257,7 @@ DAW의 채널 스트립/플러그인 프리셋 기능을 사용하세요.
 - 빌드 시 `JUCE_WEB_BROWSER=0`, `JUCE_USE_CURL=0` 로 가벼운 옵션을
   사용합니다.
 
-## 10. 변경 이력 요약 (v0.1.0)
+## 10. 변경 이력 요약 (v1.0.0)
 
 - 첫 공개 빌드: 스테레오 in/out
 - BS.1770 K-weighting + Momentary / Short-Term / Integrated / LRA

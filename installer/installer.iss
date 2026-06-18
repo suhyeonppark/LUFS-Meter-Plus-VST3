@@ -1,5 +1,5 @@
 #define MyAppName "LUFS Meter Plus"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "1.0.0"
 #define MyAppPublisher "LUFS Meter Plus"
 #define BuildDir "C:\LocalBuild\LufsMeterPlus\LufsMeterPlus_artefacts\Release"
 
