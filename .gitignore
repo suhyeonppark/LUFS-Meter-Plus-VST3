@@ -30,6 +30,9 @@ dist/*-signed-for-notary.zip
 # Local Apple certificate request files
 *.certSigningRequest
 
+# Installer test logs
+installer/install_test.log
+
 # Local Claude Code settings
 .claude/settings.local.json
 .claude/*.lock

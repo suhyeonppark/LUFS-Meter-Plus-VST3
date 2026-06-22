@@ -18,7 +18,7 @@ public:
 
     static constexpr const char* kDefaultHost      = "255.255.255.255";
     static constexpr int         kDefaultPort      = 49152;
-    static constexpr int         kSendIntervalMs   = 1000;
+    static constexpr int         kSendIntervalMs   = 50;
     static constexpr bool        kDefaultEnabled   = true;
 
     // Port the monitor app sends control commands (e.g. reset) to.

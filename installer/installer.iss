@@ -1,7 +1,7 @@
 #define MyAppName "LUFS Meter Plus"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "LUFS Meter Plus"
-#define BuildDir "C:\LocalBuild\LufsMeterPlus\LufsMeterPlus_artefacts\Release"
+#define BuildDir "C:\dev\LMP-vst3\build\vs2022\LufsMeterPlus_artefacts\Release"
 
 [Setup]
 AppId={{B3A2F1C0-4D5E-4F6A-8B7C-9D0E1F2A3B4C}
